@@ -1,0 +1,32 @@
+# Archivos de construcción
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.log
+
+# Archivos de IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Archivos de Maven
+.mvn/
+mvnw
+mvnw.cmd
+
+# Archivos de Azure Functions
+local.settings.json
+.azure/
+
+# Archivos de pruebas
+*.log
+test-output/
+
+# Dependencias
+node_modules/

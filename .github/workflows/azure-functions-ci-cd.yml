@@ -1,0 +1,342 @@
+name: CI/CD Azure Functions Lab - NTT Data
+
+# Trigger: Solo se ejecuta en ramas que comiencen con 'release/'
+on:
+  push:
+    branches:
+      - 'release/**'
+  workflow_dispatch:
+
+# Permisos necesarios para el workflow
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build-test-deploy:
+    name: Build, Test and Deploy Azure Function
+    runs-on: ubuntu-latest
+    
+    # Usar el entorno 'dev' para heredar secretos de GitHub Environments
+    environment:
+      name: dev
+    
+    env:
+      JAVA_VERSION: '17'
+      AZURE_LOCATION: 'centralus'
+      
+    steps:
+      # ============================================
+      # PASO 1: Checkout del código
+      # ============================================
+      - name: 📥 Checkout código
+        uses: actions/checkout@v4
+
+      # ============================================
+      # PASO 2: Extraer ID del empleado desde el nombre de la rama
+      # Ejemplo: release/EMP12345 -> EMP12345
+      # ============================================
+      - name: 🔍 Extraer código de empleado
+        id: extract-id
+        run: |
+          BRANCH_NAME="${{ github.ref_name }}"
+          echo "Rama actual: $BRANCH_NAME"
+          
+          # Extraer el ID después de 'release/'
+          EMPLOYEE_ID=$(echo "$BRANCH_NAME" | sed 's|release/||')
+          
+          # Convertir a minúsculas para Azure (requisito de nomenclatura)
+          EMPLOYEE_ID_LOWER=$(echo "$EMPLOYEE_ID" | tr '[:upper:]' '[:lower:]')
+          
+          echo "Código de empleado: $EMPLOYEE_ID_LOWER"
+          
+          # Definir nombres de recursos
+          RESOURCE_GROUP="rg-lab-ntt-${EMPLOYEE_ID_LOWER}"
+          FUNCTION_APP="fn-lab-ntt-${EMPLOYEE_ID_LOWER}"
+          STORAGE_ACCOUNT="stlabntt${EMPLOYEE_ID_LOWER}"
+          
+          # Exportar variables para siguientes pasos
+          echo "employee_id=$EMPLOYEE_ID_LOWER" >> $GITHUB_OUTPUT
+          echo "resource_group=$RESOURCE_GROUP" >> $GITHUB_OUTPUT
+          echo "function_app=$FUNCTION_APP" >> $GITHUB_OUTPUT
+          echo "storage_account=$STORAGE_ACCOUNT" >> $GITHUB_OUTPUT
+          
+          # Mostrar resumen
+          echo "### 🏷️ Recursos identificados" >> $GITHUB_STEP_SUMMARY
+          echo "- **Employee ID**: \`$EMPLOYEE_ID_LOWER\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Resource Group**: \`$RESOURCE_GROUP\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Function App**: \`$FUNCTION_APP\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Storage Account**: \`$STORAGE_ACCOUNT\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Plan Type**: Consumption (Serverless)" >> $GITHUB_STEP_SUMMARY
+
+      # ============================================
+      # PASO 3: Configurar Java 17
+      # ============================================
+      - name: ☕ Configurar Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'microsoft'
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: 'maven'
+
+      # ============================================
+      # PASO 4: Validación Pre-Despliegue - Unit Tests
+      # ============================================
+      - name: 🧪 Ejecutar tests unitarios
+        run: |
+          echo "### 🧪 Ejecutando Unit Tests" >> $GITHUB_STEP_SUMMARY
+          mvn clean test -B
+          
+          if [ $? -eq 0 ]; then
+            echo "✅ Todos los tests pasaron correctamente" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Los tests fallaron. Revisa tu código." >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+
+      # ============================================
+      # PASO 5: Compilar y empaquetar la aplicación
+      # ============================================
+      - name: 📦 Compilar y empaquetar
+        env:
+          FUNCTION_APP_NAME: ${{ steps.extract-id.outputs.function_app }}
+          RESOURCE_GROUP: ${{ steps.extract-id.outputs.resource_group }}
+        run: |
+          echo "Empaquetando aplicación..."
+          mvn clean package -DskipTests -B
+          echo "✅ Aplicación empaquetada correctamente" >> $GITHUB_STEP_SUMMARY
+
+      # ============================================
+      # PASO 6: Login en Azure usando credenciales del entorno
+      # ============================================
+      - name: 🔐 Login en Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # ============================================
+      # PASO 7: Gestión Inteligente de Infraestructura (Idempotencia)
+      # Verificar si el Resource Group ya existe
+      # ============================================
+      - name: 🏗️ Verificar y crear infraestructura
+        id: infrastructure
+        run: |
+          RG="${{ steps.extract-id.outputs.resource_group }}"
+          LOCATION="${{ env.AZURE_LOCATION }}"
+          
+          echo "Verificando si el Resource Group existe: $RG"
+          
+          # Verificar si el Resource Group existe
+          if az group exists --name "$RG" | grep -q "true"; then
+            echo "✅ Resource Group '$RG' ya existe. Omitiendo creación." >> $GITHUB_STEP_SUMMARY
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "🆕 Resource Group '$RG' no existe. Creándolo..." >> $GITHUB_STEP_SUMMARY
+            
+            # Crear Resource Group
+            az group create \
+              --name "$RG" \
+              --location "$LOCATION" \
+              --tags "Environment=Lab" "Project=NTTData" "ManagedBy=GitHubActions"
+            
+            echo "✅ Resource Group creado exitosamente" >> $GITHUB_STEP_SUMMARY
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      # ============================================
+      # PASO 8: Crear Storage Account (si no existe)
+      # ============================================
+      - name: 💾 Configurar Storage Account
+        run: |
+          RG="${{ steps.extract-id.outputs.resource_group }}"
+          STORAGE="${{ steps.extract-id.outputs.storage_account }}"
+          LOCATION="${{ env.AZURE_LOCATION }}"
+          
+          # Verificar si existe
+          if az storage account show --name "$STORAGE" --resource-group "$RG" &>/dev/null; then
+            echo "✅ Storage Account '$STORAGE' ya existe" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "🆕 Creando Storage Account '$STORAGE'..." >> $GITHUB_STEP_SUMMARY
+            
+            az storage account create \
+              --name "$STORAGE" \
+              --resource-group "$RG" \
+              --location "$LOCATION" \
+              --sku Standard_LRS \
+              --kind StorageV2
+            
+            echo "✅ Storage Account creado" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      # ============================================
+      # PASO 9: Crear Function App directamente con plan Consumption
+      # ============================================
+      - name: ⚡ Configurar Function App (Consumption Plan)
+        run: |
+          RG="${{ steps.extract-id.outputs.resource_group }}"
+          FUNC_APP="${{ steps.extract-id.outputs.function_app }}"
+          STORAGE="${{ steps.extract-id.outputs.storage_account }}"
+          LOCATION="${{ env.AZURE_LOCATION }}"
+          
+          # Verificar si existe
+          if az functionapp show --name "$FUNC_APP" --resource-group "$RG" &>/dev/null; then
+            echo "✅ Function App '$FUNC_APP' ya existe" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "🆕 Creando Function App '$FUNC_APP' con plan Consumption..." >> $GITHUB_STEP_SUMMARY
+            
+            az functionapp create \
+              --name "$FUNC_APP" \
+              --resource-group "$RG" \
+              --storage-account "$STORAGE" \
+              --consumption-plan-location "$LOCATION" \
+              --runtime java \
+              --runtime-version 17 \
+              --functions-version 4 \
+              --os-type Linux
+            
+            echo "✅ Function App creada con plan Consumption" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      # ============================================
+      # PASO 10: Desplegar la aplicación usando Maven Plugin
+      # ============================================
+      - name: 🚀 Desplegar a Azure Functions
+        env:
+          FUNCTION_APP_NAME: ${{ steps.extract-id.outputs.function_app }}
+          RESOURCE_GROUP: ${{ steps.extract-id.outputs.resource_group }}
+        run: |
+          echo "Desplegando aplicación a $FUNCTION_APP_NAME..."
+          mvn azure-functions:deploy -B
+          
+          echo "### 🚀 Despliegue completado" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Aplicación desplegada correctamente" >> $GITHUB_STEP_SUMMARY
+
+      # ============================================
+      # PASO 11: Esperar a que la función esté disponible
+      # ============================================
+      - name: ⏳ Esperar disponibilidad del servicio
+        run: |
+          echo "Esperando 30 segundos para que la función se inicialice..."
+          sleep 30
+          echo "✅ Tiempo de espera completado" >> $GITHUB_STEP_SUMMARY
+
+      # ============================================
+      # PASO 12: Validación Post-Despliegue - Smoke Test
+      # ============================================
+      - name: 🔍 Smoke Test - Verificar endpoints
+        id: smoke-test
+        run: |
+          FUNC_APP="${{ steps.extract-id.outputs.function_app }}"
+          BASE_URL="https://${FUNC_APP}.azurewebsites.net"
+          
+          echo "### 🔍 Smoke Tests" >> $GITHUB_STEP_SUMMARY
+          echo "Base URL: $BASE_URL" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Test 1: Health Check
+          echo "**Test 1: Health Check**" >> $GITHUB_STEP_SUMMARY
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/api/health")
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ Health endpoint: OK (HTTP $HTTP_CODE)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Health endpoint: FAILED (HTTP $HTTP_CODE)" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          
+          # Test 2: Endpoint Saludar
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Test 2: Endpoint Saludar**" >> $GITHUB_STEP_SUMMARY
+          RESPONSE=$(curl -s "$BASE_URL/api/saludar?nombre=TestCI")
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/api/saludar?nombre=TestCI")
+          
+          if [ "$HTTP_CODE" = "200" ] && echo "$RESPONSE" | grep -q "TestCI"; then
+            echo "✅ Saludar endpoint: OK" >> $GITHUB_STEP_SUMMARY
+            echo "   Respuesta: \`$RESPONSE\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Saludar endpoint: FAILED" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          
+          # Test 3: Endpoint Calcular
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Test 3: Endpoint Calcular**" >> $GITHUB_STEP_SUMMARY
+          RESPONSE=$(curl -s "$BASE_URL/api/calcular?a=5&b=3")
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/api/calcular?a=5&b=3")
+          
+          if [ "$HTTP_CODE" = "200" ] && echo "$RESPONSE" | grep -q "\"resultado\": 8"; then
+            echo "✅ Calcular endpoint: OK" >> $GITHUB_STEP_SUMMARY
+            echo "   Respuesta: \`$RESPONSE\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ Calcular endpoint: FAILED" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ✅ Todos los smoke tests pasaron correctamente" >> $GITHUB_STEP_SUMMARY
+
+      # ============================================
+      # PASO 13: Mostrar URLs para pruebas manuales
+      # ============================================
+      - name: 📋 Resumen y URLs de prueba
+        if: success()
+        run: |
+          FUNC_APP="${{ steps.extract-id.outputs.function_app }}"
+          BASE_URL="https://${FUNC_APP}.azurewebsites.net"
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎉 Despliegue Exitoso" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 🔗 URLs para pruebas manuales:" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Health Check**: [$BASE_URL/api/health]($BASE_URL/api/health)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Saludar**: [$BASE_URL/api/saludar?nombre=TuNombre]($BASE_URL/api/saludar?nombre=TuNombre)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Calcular**: [$BASE_URL/api/calcular?a=10&b=5]($BASE_URL/api/calcular?a=10&b=5)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 Información del entorno:" >> $GITHUB_STEP_SUMMARY
+          echo "- **Resource Group**: \`${{ steps.extract-id.outputs.resource_group }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Function App**: \`$FUNC_APP\`" >> $GITHUB_STEP_SUMMARY
+          echo "- **Región**: \`${{ env.AZURE_LOCATION }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "> ⚠️ **Recuerda**: Este entorno se auto-eliminará en 2 horas para controlar costos." >> $GITHUB_STEP_SUMMARY
+
+      # ============================================
+      # PASO 14: Auto-Eliminación programada (Cost Control)
+      # ============================================
+      - name: 🗑️ Programar auto-eliminación del Resource Group
+        if: success()
+        run: |
+          RG="${{ steps.extract-id.outputs.resource_group }}"
+          
+          echo "### ⏰ Auto-eliminación programada" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "El Resource Group \`$RG\` se eliminará en 2 horas." >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Para cancelar la eliminación automática, ejecuta:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "# Este comando debe ejecutarse manualmente si deseas mantener los recursos" >> $GITHUB_STEP_SUMMARY
+          echo "# az group lock create --name DoNotDelete --resource-group $RG --lock-type CanNotDelete" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Para eliminar manualmente ahora:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
+          echo "az group delete --name $RG --yes --no-wait" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          
+          # Nota: En un escenario real, podrías usar Azure Automation, Logic Apps
+          # o una GitHub Action programada para eliminar el grupo después de N horas.
+          # Por ahora, dejamos el comando documentado para ejecución manual.
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ **IMPORTANTE**: Por razones de seguridad, la eliminación automática" >> $GITHUB_STEP_SUMMARY
+          echo "debe configurarse fuera del workflow. Elimina los recursos manualmente" >> $GITHUB_STEP_SUMMARY
+          echo "después de tus pruebas usando el comando anterior." >> $GITHUB_STEP_SUMMARY
+
+      # ============================================
+      # PASO 15: Logout de Azure (limpieza)
+      # ============================================
+      - name: 🔓 Logout de Azure
+        if: always()
+        run: |
+          az logout

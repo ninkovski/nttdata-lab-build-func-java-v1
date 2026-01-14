@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.nttdata.lab</groupId>
+    <artifactId>azure-functions-lab</artifactId>
+    <version>1.0.0</version>
+    <packaging>jar</packaging>
+
+    <name>NTT Data Azure Functions Lab</name>
+    <description>Laboratorio de Azure Functions para estudiantes</description>
+
+    <properties>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <java.version>17</java.version>
+        <maven.compiler.source>17</maven.compiler.source>
+        <maven.compiler.target>17</maven.compiler.target>
+        <azure.functions.maven.plugin.version>1.36.0</azure.functions.maven.plugin.version>
+        <azure.functions.java.library.version>3.1.0</azure.functions.java.library.version>
+        <junit.version>5.10.1</junit.version>
+        <mockito.version>5.8.0</mockito.version>
+        
+        <!-- Variables dinámicas para el despliegue - Se pasan desde GitHub Actions -->
+        <functionAppName>${env.FUNCTION_APP_NAME}</functionAppName>
+        <resourceGroup>${env.RESOURCE_GROUP}</resourceGroup>
+        <functionAppRegion>westeurope</functionAppRegion>
+    </properties>
+
+    <dependencies>
+        <!-- Azure Functions Java Library -->
+        <dependency>
+            <groupId>com.microsoft.azure.functions</groupId>
+            <artifactId>azure-functions-java-library</artifactId>
+            <version>${azure.functions.java.library.version}</version>
+        </dependency>
+
+        <!-- JUnit 5 para testing -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-api</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-engine</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- Mockito para mocking -->
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-core</artifactId>
+            <version>${mockito.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-junit-jupiter</artifactId>
+            <version>${mockito.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <!-- Maven Compiler Plugin -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <source>${java.version}</source>
+                    <target>${java.version}</target>
+                    <encoding>${project.build.sourceEncoding}</encoding>
+                </configuration>
+            </plugin>
+
+            <!-- Azure Functions Maven Plugin -->
+            <plugin>
+                <groupId>com.microsoft.azure</groupId>
+                <artifactId>azure-functions-maven-plugin</artifactId>
+                <version>${azure.functions.maven.plugin.version}</version>
+                <configuration>
+                    <!-- Nombre de la Function App obtenido de variables de entorno -->
+                    <appName>${functionAppName}</appName>
+                    <resourceGroup>${resourceGroup}</resourceGroup>
+                    <region>${functionAppRegion}</region>
+                    
+                    <!-- Configuración del runtime -->
+                    <runtime>
+                        <os>linux</os>
+                        <javaVersion>17</javaVersion>
+                    </runtime>
+                    
+                    <!-- Configuración de la aplicación -->
+                    <appSettings>
+                        <property>
+                            <name>FUNCTIONS_EXTENSION_VERSION</name>
+                            <value>~4</value>
+                        </property>
+                        <property>
+                            <name>FUNCTIONS_WORKER_RUNTIME</name>
+                            <value>java</value>
+                        </property>
+                    </appSettings>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>package-functions</id>
+                        <goals>
+                            <goal>package</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!-- Maven Surefire Plugin para ejecutar tests -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.2.3</version>
+                <configuration>
+                    <includes>
+                        <include>**/*Test.java</include>
+                    </includes>
+                </configuration>
+            </plugin>
+
+            <!-- Maven Clean Plugin -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-clean-plugin</artifactId>
+                <version>3.3.2</version>
+            </plugin>
+
+            <!-- Maven Resources Plugin -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <version>3.3.1</version>
+            </plugin>
+        </plugins>
+    </build>
+</project>
