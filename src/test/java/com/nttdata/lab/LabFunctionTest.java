@@ -221,6 +221,12 @@ class LabFunctionTest {
         }
 
         @Override
+        public HttpResponseMessage.Builder status(HttpStatusType status) {
+            this.status = HttpStatus.valueOf(status.value());
+            return this;
+        }
+
+        @Override
         public HttpResponseMessage.Builder header(String key, String value) {
             headers.put(key, value);
             return this;
