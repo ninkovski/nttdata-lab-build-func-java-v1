@@ -214,15 +214,8 @@ class LabFunctionTest {
             this.status = status;
         }
 
-        @Override
         public HttpResponseMessage.Builder status(HttpStatus status) {
             this.status = status;
-            return this;
-        }
-
-        @Override
-        public HttpResponseMessage.Builder status(HttpStatusType status) {
-            this.status = HttpStatus.valueOf(status.value());
             return this;
         }
 
