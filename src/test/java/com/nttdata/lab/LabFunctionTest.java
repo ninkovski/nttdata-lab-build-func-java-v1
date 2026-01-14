@@ -176,20 +176,23 @@ class LabFunctionTest {
         }
         
         when(req.getQueryParameters()).thenReturn(queryParams);
-        
-        // Mock del builder y response usando Mockito
-        HttpResponseMessage.Builder builder = mock(HttpResponseMessage.Builder.class);
-        HttpResponseMessage response = mock(HttpResponseMessage.class);
-        
-        when(req.createResponseBuilder(any(HttpStatus.class))).thenReturn(builder);
-        when(builder.status(any(HttpStatus.class))).thenReturn(builder);
-        when(builder.header(anyString(), anyString())).thenReturn(builder);
-        when(builder.body(any())).thenAnswer(invocation -> {
-            when(response.getBody()).thenReturn(invocation.getArgument(0));
-            when(response.getStatus()).thenReturn(HttpStatus.OK);
-            return builder;
-        });
-        when(builder.build()).thenReturn(response);
+        when(req.createResponseBuilder(any(HttpStatus.class)))
+            .thenAnswer(invocation -> {
+                HttpStatus status = invocation.getArgument(0);
+                HttpResponseMessage.Builder builder = mock(HttpResponseMessage.Builder.class);
+                HttpResponseMessage response = mock(HttpResponseMessage.class);
+                
+                when(response.getStatus()).thenReturn(status);
+                when(builder.status(any(HttpStatus.class))).thenReturn(builder);
+                when(builder.header(anyString(), anyString())).thenReturn(builder);
+                when(builder.body(any())).thenAnswer(bodyInv -> {
+                    when(response.getBody()).thenReturn(bodyInv.getArgument(0));
+                    return builder;
+                });
+                when(builder.build()).thenReturn(response);
+                
+                return builder;
+            });
         
         return req;
     }
@@ -202,20 +205,23 @@ class LabFunctionTest {
         HttpRequestMessage<Optional<String>> req = mock(HttpRequestMessage.class);
         
         when(req.getQueryParameters()).thenReturn(params);
-        
-        // Mock del builder y response usando Mockito
-        HttpResponseMessage.Builder builder = mock(HttpResponseMessage.Builder.class);
-        HttpResponseMessage response = mock(HttpResponseMessage.class);
-        
-        when(req.createResponseBuilder(any(HttpStatus.class))).thenReturn(builder);
-        when(builder.status(any(HttpStatus.class))).thenReturn(builder);
-        when(builder.header(anyString(), anyString())).thenReturn(builder);
-        when(builder.body(any())).thenAnswer(invocation -> {
-            when(response.getBody()).thenReturn(invocation.getArgument(0));
-            when(response.getStatus()).thenReturn(HttpStatus.OK);
-            return builder;
-        });
-        when(builder.build()).thenReturn(response);
+        when(req.createResponseBuilder(any(HttpStatus.class)))
+            .thenAnswer(invocation -> {
+                HttpStatus status = invocation.getArgument(0);
+                HttpResponseMessage.Builder builder = mock(HttpResponseMessage.Builder.class);
+                HttpResponseMessage response = mock(HttpResponseMessage.class);
+                
+                when(response.getStatus()).thenReturn(status);
+                when(builder.status(any(HttpStatus.class))).thenReturn(builder);
+                when(builder.header(anyString(), anyString())).thenReturn(builder);
+                when(builder.body(any())).thenAnswer(bodyInv -> {
+                    when(response.getBody()).thenReturn(bodyInv.getArgument(0));
+                    return builder;
+                });
+                when(builder.build()).thenReturn(response);
+                
+                return builder;
+            });
         
         return req;
     }
