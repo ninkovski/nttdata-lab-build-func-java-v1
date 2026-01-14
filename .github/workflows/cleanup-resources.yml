@@ -1,0 +1,86 @@
+name: Cleanup - Auto-eliminar Resource Groups Lab
+
+# Se ejecuta cada 2 horas y elimina recursos con tag DeleteAfter vencido
+on:
+  schedule:
+    - cron: '0 */2 * * *'  # Cada 2 horas
+  workflow_dispatch:  # Permitir ejecución manual
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    name: Eliminar recursos vencidos
+    runs-on: ubuntu-latest
+    
+    environment:
+      name: dev
+    
+    steps:
+      - name: 🔐 Login en Azure
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: 🔍 Buscar y eliminar recursos vencidos
+        run: |
+          echo "### 🗑️ Cleanup de recursos de laboratorio" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          CURRENT_TIME=$(date +%s)
+          echo "Hora actual: $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Buscar todos los resource groups de laboratorio con tag DeleteAfter
+          echo "Buscando resource groups con tag DeleteAfter..."
+          RGS=$(az group list --query "[?starts_with(name, 'rg-lab-ntt-') && tags.DeleteAfter != null].{name:name, deleteAfter:tags.DeleteAfter}" -o json)
+          
+          if [ "$RGS" = "[]" ]; then
+            echo "✅ No hay recursos programados para eliminación" >> $GITHUB_STEP_SUMMARY
+            exit 0
+          fi
+          
+          echo "**Resource Groups encontrados con programación de eliminación:**" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          DELETED_COUNT=0
+          PENDING_COUNT=0
+          
+          # Procesar cada resource group
+          echo "$RGS" | jq -c '.[]' | while read -r rg; do
+            RG_NAME=$(echo "$rg" | jq -r '.name')
+            DELETE_AFTER=$(echo "$rg" | jq -r '.deleteAfter')
+            
+            echo "Procesando: $RG_NAME (DeleteAfter: $DELETE_AFTER)"
+            
+            # Comparar timestamps
+            if [ "$CURRENT_TIME" -ge "$DELETE_AFTER" ]; then
+              echo "⏰ $RG_NAME ha vencido. Eliminando..." >> $GITHUB_STEP_SUMMARY
+              
+              # Eliminar el resource group
+              az group delete --name "$RG_NAME" --yes --no-wait
+              
+              echo "   ✅ \`$RG_NAME\` eliminado exitosamente" >> $GITHUB_STEP_SUMMARY
+              DELETED_COUNT=$((DELETED_COUNT + 1))
+            else
+              # Calcular tiempo restante
+              TIME_LEFT=$((DELETE_AFTER - CURRENT_TIME))
+              HOURS_LEFT=$((TIME_LEFT / 3600))
+              MINUTES_LEFT=$(((TIME_LEFT % 3600) / 60))
+              
+              echo "   ⏳ \`$RG_NAME\` - Tiempo restante: ${HOURS_LEFT}h ${MINUTES_LEFT}m" >> $GITHUB_STEP_SUMMARY
+              PENDING_COUNT=$((PENDING_COUNT + 1))
+            fi
+          done
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "**Resumen:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Eliminados: $DELETED_COUNT" >> $GITHUB_STEP_SUMMARY
+          echo "- Pendientes: $PENDING_COUNT" >> $GITHUB_STEP_SUMMARY
+
+      - name: 🔓 Logout de Azure
+        if: always()
+        run: |
+          az logout
