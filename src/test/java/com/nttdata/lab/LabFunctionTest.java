@@ -179,7 +179,19 @@ class LabFunctionTest {
         when(req.createResponseBuilder(any(HttpStatus.class)))
             .thenAnswer(invocation -> {
                 HttpStatus status = invocation.getArgument(0);
-                return new MockResponseBuilder(status);
+                HttpResponseMessage.Builder builder = mock(HttpResponseMessage.Builder.class);
+                HttpResponseMessage response = mock(HttpResponseMessage.class);
+                
+                when(response.getStatus()).thenReturn(status);
+                when(builder.status(any(HttpStatus.class))).thenReturn(builder);
+                when(builder.header(anyString(), anyString())).thenReturn(builder);
+                when(builder.body(any())).thenAnswer(bodyInv -> {
+                    when(response.getBody()).thenReturn(bodyInv.getArgument(0));
+                    return builder;
+                });
+                when(builder.build()).thenReturn(response);
+                
+                return builder;
             });
         
         return req;
@@ -196,60 +208,21 @@ class LabFunctionTest {
         when(req.createResponseBuilder(any(HttpStatus.class)))
             .thenAnswer(invocation -> {
                 HttpStatus status = invocation.getArgument(0);
-                return new MockResponseBuilder(status);
+                HttpResponseMessage.Builder builder = mock(HttpResponseMessage.Builder.class);
+                HttpResponseMessage response = mock(HttpResponseMessage.class);
+                
+                when(response.getStatus()).thenReturn(status);
+                when(builder.status(any(HttpStatus.class))).thenReturn(builder);
+                when(builder.header(anyString(), anyString())).thenReturn(builder);
+                when(builder.body(any())).thenAnswer(bodyInv -> {
+                    when(response.getBody()).thenReturn(bodyInv.getArgument(0));
+                    return builder;
+                });
+                when(builder.build()).thenReturn(response);
+                
+                return builder;
             });
         
         return req;
-    }
-
-    /**
-     * Builder mock para crear respuestas HTTP
-     */
-    static class MockResponseBuilder implements HttpResponseMessage.Builder {
-        private HttpStatus status;
-        private Object body;
-        private Map<String, String> headers = new HashMap<>();
-
-        MockResponseBuilder(HttpStatus status) {
-            this.status = status;
-        }
-
-        @Override
-        public HttpResponseMessage.Builder status(HttpStatus status) {
-            this.status = status;
-            return this;
-        }
-
-        @Override
-        public HttpResponseMessage.Builder header(String key, String value) {
-            headers.put(key, value);
-            return this;
-        }
-
-        @Override
-        public HttpResponseMessage.Builder body(Object body) {
-            this.body = body;
-            return this;
-        }
-
-        @Override
-        public HttpResponseMessage build() {
-            return new HttpResponseMessage() {
-                @Override
-                public HttpStatus getStatus() {
-                    return status;
-                }
-
-                @Override
-                public String getHeader(String key) {
-                    return headers.get(key);
-                }
-
-                @Override
-                public Object getBody() {
-                    return body;
-                }
-            };
-        }
     }
 }

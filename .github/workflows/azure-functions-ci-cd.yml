@@ -128,19 +128,24 @@ jobs:
           
           # Verificar si el Resource Group existe
           if az group exists --name "$RG" | grep -q "true"; then
-            echo "✅ Resource Group '$RG' ya existe. Omitiendo creación." >> $GITHUB_STEP_SUMMARY
-            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "✅ Resource Group '$RG' ya existe. No se programa destrucción." >> $GITHUB_STEP_SUMMARY
+            echo "resource_created=false" >> $GITHUB_OUTPUT
           else
             echo "🆕 Resource Group '$RG' no existe. Creándolo..." >> $GITHUB_STEP_SUMMARY
             
-            # Crear Resource Group
+            # Calcular timestamp de eliminación (2 horas desde ahora)
+            DELETE_AFTER=$(date -u -d "+2 hours" +%s 2>/dev/null || date -u -v +2H +%s)
+            DELETE_TIME=$(date -d @"$DELETE_AFTER" -u 2>/dev/null || date -r "$DELETE_AFTER" -u)
+            
+            # Crear Resource Group con tag de auto-eliminación
             az group create \
               --name "$RG" \
               --location "$LOCATION" \
-              --tags "Environment=Lab" "Project=NTTData" "ManagedBy=GitHubActions"
+              --tags "Environment=Lab" "Project=NTTData" "ManagedBy=GitHubActions" "DeleteAfter=$DELETE_AFTER"
             
             echo "✅ Resource Group creado exitosamente" >> $GITHUB_STEP_SUMMARY
-            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "⏰ Auto-eliminación programada para: $DELETE_TIME (en 2 horas)" >> $GITHUB_STEP_SUMMARY
+            echo "resource_created=true" >> $GITHUB_OUTPUT
           fi
 
       # ============================================
@@ -192,9 +197,10 @@ jobs:
               --runtime java \
               --runtime-version 17 \
               --functions-version 4 \
-              --os-type Linux
+              --os-type Linux \
+              --disable-app-insights
             
-            echo "✅ Function App creada con plan Consumption" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Function App creada con plan Consumption (sin App Insights)" >> $GITHUB_STEP_SUMMARY
           fi
 
       # ============================================
@@ -298,43 +304,15 @@ jobs:
           echo "- **Resource Group**: \`${{ steps.extract-id.outputs.resource_group }}\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Function App**: \`$FUNC_APP\`" >> $GITHUB_STEP_SUMMARY
           echo "- **Región**: \`${{ env.AZURE_LOCATION }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "> ⚠️ **Recuerda**: Este entorno se auto-eliminará en 2 horas para controlar costos." >> $GITHUB_STEP_SUMMARY
+          
+          # Mostrar información de auto-eliminación si el recurso fue creado
+          if [ "${{ steps.infrastructure.outputs.resource_created }}" = "true" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "> ⚠️ **Auto-eliminación programada**: Este entorno se eliminará automáticamente en 2 horas." >> $GITHUB_STEP_SUMMARY
+          fi
 
       # ============================================
-      # PASO 14: Auto-Eliminación programada (Cost Control)
-      # ============================================
-      - name: 🗑️ Programar auto-eliminación del Resource Group
-        if: success()
-        run: |
-          RG="${{ steps.extract-id.outputs.resource_group }}"
-          
-          echo "### ⏰ Auto-eliminación programada" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "El Resource Group \`$RG\` se eliminará en 2 horas." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Para cancelar la eliminación automática, ejecuta:" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "# Este comando debe ejecutarse manualmente si deseas mantener los recursos" >> $GITHUB_STEP_SUMMARY
-          echo "# az group lock create --name DoNotDelete --resource-group $RG --lock-type CanNotDelete" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Para eliminar manualmente ahora:" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "az group delete --name $RG --yes --no-wait" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
-          
-          # Nota: En un escenario real, podrías usar Azure Automation, Logic Apps
-          # o una GitHub Action programada para eliminar el grupo después de N horas.
-          # Por ahora, dejamos el comando documentado para ejecución manual.
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "⚠️ **IMPORTANTE**: Por razones de seguridad, la eliminación automática" >> $GITHUB_STEP_SUMMARY
-          echo "debe configurarse fuera del workflow. Elimina los recursos manualmente" >> $GITHUB_STEP_SUMMARY
-          echo "después de tus pruebas usando el comando anterior." >> $GITHUB_STEP_SUMMARY
-
-      # ============================================
-      # PASO 15: Logout de Azure (limpieza)
+      # PASO 14: Logout de Azure (limpieza)
       # ============================================
       - name: 🔓 Logout de Azure
         if: always()
